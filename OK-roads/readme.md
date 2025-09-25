@@ -33,3 +33,10 @@ CREATE TABLE app.roads_nodesxy (node_id INTEGER NOT NULL PRIMARY KEY, osm_id INT
 INSERT INTO app.roads_nodesxy (node_id, osm_id, cardinality, X, Y) SELECT node_id, osm_id, cardinality, ST_X( geometry), ST_Y (geometry) FROM roads.roads_nodes;
 ```
 (roads_nodes isn't strictly required as it can be recomputed if needed, however it's a quick way to do a bounding box search while testing things)
+
+Fix this output in the voters_new.db:
+```
+ALTER TABLE roadst RENAME TO roads;
+
+ALTER TABLE roads ADD COLUMN name TEXT DEFAULT "";
+```
