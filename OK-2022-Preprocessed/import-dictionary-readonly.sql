@@ -1,6 +1,6 @@
 -- extract the 7z, run sqlite CLI and use this.
--- Run this in a memory database (sqlite3) and it will create a "voters_new.db"
-ATTACH DATABASE 'voters_new.db' AS dbA; 
+-- Run this in a brand new DB (e.g., sqlite3 store.db)
+-- This will create views
 PRAGMA synchronous=OFF;
 PRAGMA count_changes=OFF;
 PRAGMA journal_mode=OFF;
@@ -20,6 +20,7 @@ CREATE TABLE dict_lastname  (name TEXT);
 CREATE TABLE dict_city      (name TEXT);
 CREATE TABLE dict_state     (name TEXT);
 CREATE TABLE dict_street    (name TEXT);
+
 
 -- -------------- Compact import tables --------------
 DROP TABLE IF EXISTS voters_compact;
@@ -67,36 +68,37 @@ CREATE TABLE addresses_compact (
 
 .import voters_compact.psv voters_compact
 .import addresses_compact.psv addresses_compact
+.mode list
 
--- Rehydrate Voters
-DROP TABLE IF EXISTS dbA.voters;
-CREATE TABLE dbA.voters (
-  xid             INTEGER PRIMARY KEY,     -- keeps original xid
-  LASTNAME        TEXT,
-  FIRSTNAME       TEXT,
-  MIDDLENAME      TEXT,
-  VOTERID         TEXT,                    -- original schema used TEXT
-  PARTY           TEXT,
-  ADDRESS         TEXT,
-  CITY            TEXT,
-  STATE           TEXT,
-  ZIP             INTEGER,
-  DATEOFBIRTH     INTEGER,                    -- text; we emit ISO 8601 "YYYY-MM-DD"
-  REGISTRATIONDATE INTEGER                    -- original had it; keep column as NULLs
-);
+-- On compact tables (foreign-key-like columns)
+CREATE INDEX IF NOT EXISTS idx_vc_last ON voters_compact(lastname_i);
+CREATE INDEX IF NOT EXISTS idx_vc_first ON voters_compact(firstname_i);
+CREATE INDEX IF NOT EXISTS idx_vc_mid ON voters_compact(middlename_i);
+CREATE INDEX IF NOT EXISTS idx_vc_street ON voters_compact(street_i);
+CREATE INDEX IF NOT EXISTS idx_vc_city ON voters_compact(city_i);
+CREATE INDEX IF NOT EXISTS idx_vc_state ON voters_compact(state_i);
 
-INSERT INTO dbA.voters (
-  xid, LASTNAME, FIRSTNAME, MIDDLENAME, VOTERID, PARTY,
-  ADDRESS, CITY, STATE, ZIP, DATEOFBIRTH, REGISTRATIONDATE
-)
+CREATE INDEX IF NOT EXISTS idx_ac_street ON addresses_compact(street_i);
+CREATE INDEX IF NOT EXISTS idx_ac_city ON addresses_compact(city_i);
+CREATE INDEX IF NOT EXISTS idx_ac_state ON addresses_compact(state_i);
+
+-- On dictionary names (optional but can help if you ever look them up by text)
+CREATE INDEX IF NOT EXISTS idx_df_name ON dict_firstname(name);
+CREATE INDEX IF NOT EXISTS idx_dm_name ON dict_middlename(name);
+CREATE INDEX IF NOT EXISTS idx_dl_name ON dict_lastname(name);
+CREATE INDEX IF NOT EXISTS idx_dc_name ON dict_city(name);
+CREATE INDEX IF NOT EXISTS idx_ds_name ON dict_state(name);
+CREATE INDEX IF NOT EXISTS idx_dstr_name ON dict_street(name);
+
+-- Voters view (rehydrated fields)
+CREATE VIEW IF NOT EXISTS voters_v AS
 SELECT
   vc.xid,
   dln.name  AS LASTNAME,
   dfn.name  AS FIRSTNAME,
   dmn.name  AS MIDDLENAME,
-  CAST(vc.VOTERID AS TEXT) AS VOTERID,              -- keep as TEXT to match original
-  NULLIF(vc.PARTY,'') AS PARTY,
-  -- ADDRESS: housenumber + space + street name (trim to avoid trailing/leading spaces)
+  CAST(vc.VOTERID AS TEXT) AS VOTERID,
+  vc.PARTY,
   TRIM(
     COALESCE(NULLIF(vc.housenumber,''),'')
     || CASE WHEN NULLIF(vc.housenumber,'') IS NOT NULL AND dstr.name IS NOT NULL THEN ' ' ELSE '' END
@@ -104,7 +106,7 @@ SELECT
   ) AS ADDRESS,
   dcity.name  AS CITY,
   dstate.name AS STATE,
-  vc.zip      AS ZIP,
+  vc.ZIP,
   vc.DATEOFBIRTH AS DATEOFBIRTH,
   -- Convert YYYYMMDD int -> 'YYYY-MM-DD' text. If null or malformed, result is NULL.
   --CASE
@@ -116,43 +118,29 @@ SELECT
   --END AS DATEOFBIRTH,
   NULL AS REGISTRATIONDATE
 FROM voters_compact vc
-LEFT JOIN dict_lastname  dln  ON dln.rowid  = vc.lastname_i
-LEFT JOIN dict_firstname dfn  ON dfn.rowid  = vc.firstname_i
-LEFT JOIN dict_middlename dmn ON dmn.rowid  = vc.middlename_i
-LEFT JOIN dict_street    dstr ON dstr.rowid = vc.street_i
-LEFT JOIN dict_city      dcity ON dcity.rowid = vc.city_i
-LEFT JOIN dict_state     dstate ON dstate.rowid = vc.state_i;
+LEFT JOIN dict_lastname   dln  ON dln.rowid  = vc.lastname_i
+LEFT JOIN dict_firstname  dfn  ON dfn.rowid  = vc.firstname_i
+LEFT JOIN dict_middlename dmn  ON dmn.rowid  = vc.middlename_i
+LEFT JOIN dict_street     dstr ON dstr.rowid = vc.street_i
+LEFT JOIN dict_city       dcity ON dcity.rowid = vc.city_i
+LEFT JOIN dict_state      dstate ON dstate.rowid = vc.state_i;
 
--- Rehydrate Addresses
-
-DROP TABLE IF EXISTS dbA.address;
-CREATE TABLE dbA.address (
-  ADDRESS TEXT,
-  CITY    TEXT,
-  STATE   TEXT,
-  ZIP     INTEGER,
-  RATING  INTEGER,
-  X       REAL,      -- back to degrees
-  Y       REAL
-);
-
-INSERT INTO dbA.address (ADDRESS, CITY, STATE, ZIP, RATING, X, Y)
+-- Addresses view (rehydrated)
+CREATE VIEW IF NOT EXISTS address_v AS
 SELECT
   TRIM(
-    REPLACE(
-      COALESCE(NULLIF(ac.housenumber,''),'')
-      || CASE WHEN NULLIF(ac.housenumber,'') IS NOT NULL AND dstr.name IS NOT NULL THEN ' ' ELSE '' END
-      || COALESCE(dstr.name,'')
-    ,'"','')
+    COALESCE(NULLIF(ac.housenumber,''),'')
+    || CASE WHEN NULLIF(ac.housenumber,'') IS NOT NULL AND dstr.name IS NOT NULL THEN ' ' ELSE '' END
+    || COALESCE(dstr.name,'')
   ) AS ADDRESS,
   dcity.name  AS CITY,
   dstate.name AS STATE,
   ac.ZIP,
   ac.RATING,
-  -- microdegrees back to decimal degrees
   ac.X / 1000000.0 AS X,
   ac.Y / 1000000.0 AS Y
 FROM addresses_compact ac
 LEFT JOIN dict_street dstr ON dstr.rowid = ac.street_i
 LEFT JOIN dict_city   dcity ON dcity.rowid = ac.city_i
 LEFT JOIN dict_state  dstate ON dstate.rowid = ac.state_i;
+
