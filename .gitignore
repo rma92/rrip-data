@@ -2,5 +2,6 @@
 *.swo
 osmium_1.16.0_win64
 sqlean-win-x64-0.28.0
+sqlean-win-x86-0.27.0
 protoc.exe
 
