@@ -1,0 +1,13 @@
+20241105 - General Election and Special Elections
+20240827 - Runoff Primary Election Special Elections
+20240618 - Primary Election and Special Elections
+20240402 - Board of Education General Election and Special Elections
+20240305 - Presidential Preferential Primary Election and Special Elections
+20240213 - Board of Education Primary Election and Special Elections
+20240109 - Special Elections (Propositions Only)
+20221108 - General Election and Special Elections
+20220628 - Primary Election and Special Elections
+20201103 - General Election and Special Elections
+20200630 - Primary Election and Special Elections
+
+--https://results.okelections.gov/OKER/?elecDate=20221108
