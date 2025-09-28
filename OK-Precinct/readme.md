@@ -57,3 +57,18 @@ SELECT
   AsTWKB( Transform( SetSRID("geometry", 2267), 4326 ), 6 ) AS "t"
 FROM "ok_precinct";
 ```
+## Make a WKB verison (for ChatGPT)
+Spatialite
+```
+ATTACH DATABASE 'OK_precinct_t-wkb.db' AS dbA;
+ALTER TABLE dbA.OK_precinct_t ADD wkb text;
+UPDATE dbA.OK_precinct_t SET wkb = AsBinary(GeomFromTWKB(t));
+```
+Make a Bzip2 to upload to ChatGPT.
+## Make a GeoJSON verison (for ChatGPT)
+Spatialite
+```
+ATTACH DATABASE 'OK_precinct_t-gj.db' AS dbA;
+ALTER TABLE dbA.OK_precinct_t ADD gj text;
+UPDATE dbA.OK_precinct_t SET gj = AsGeoJSON(GeomFromTWKB(t));
+```
