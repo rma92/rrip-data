@@ -78,30 +78,138 @@ sqlite3 temp\voters_new.db "SELECT sql || ';' FROM sqlite_master WHERE type='tab
 sqlite3 norman.db < schema.sql
 sqlite3 norman.db "ATTACH DATABASE 'temp\\voters_new.db' AS dbA; INSERT INTO address SELECT * FROM dbA.address WHERE CITY IN ('NORMAN', 'MOORE');"
 sqlite3 norman.db "ATTACH DATABASE 'temp\\voters_new.db' AS dbA; INSERT INTO voters SELECT * FROM dbA.voters WHERE CITY IN ('NORMAN', 'MOORE');"
+spatialite norman.db "ATTACH DATABASE 'temp\\voters_new.db' AS dbA; INSERT INTO roads SELECT * FROM dbA.roads AS r WHERE MBRIntersects(  GeomFromTWKB(r.twkb),  BuildMBR(    (SELECT MIN(X) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),    (SELECT MIN(Y) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),    (SELECT MAX(X) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),    (SELECT MAX(Y) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),    4326  ));";
 sqlite3 norman.db "ALTER TABLE ROADS ADD COLUMN NAME TEXT; UPDATE ROADS SET NAME = '';"
-spatialite norman.db "ATTACH DATABASE 'temp\\voters_new.db' AS dbA; INSERT INTO roads SELECT * FROM dbA.roads AS r WHERE MBRIntersects(  r.twkb,  BuildMBR(    (SELECT MIN(X) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),    (SELECT MIN(Y) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),    (SELECT MAX(X) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),    (SELECT MAX(Y) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),    4326  ));";
 ```
 
-Just the spatialite step:
+Or running it in the console after creating a database by piping in the schema:
+`spatialite` 
+sqlite3 norman2.db < schema.sql
 ```
+CREATE TABLE cities (name TEXT);
+INSERT INTO cities (name) VALUES ('NORMAN'),('MOORE');
+
+ATTACH DATABASE 'norman2.db' AS dbB;
 ATTACH DATABASE 'temp\\voters_new.db' AS dbA;
-SELECT MIN(X), MIN(Y), MAX(X), MAX(Y) FROM (SELECT * FROM ADDRESS WHERE X != 0.0 AND Y != 0.0);
+INSERT INTO dbB.address SELECT * FROM dbA.address WHERE CITY IN (SELECT name FROM CITIES);
+INSERT INTO dbB.voters SELECT * FROM dbA.voters WHERE CITY IN ('NORMAN', 'MOORE');
+
+SELECT MIN(X), MIN(Y), MAX(X), MAX(Y) FROM (SELECT * FROM dbB.ADDRESS WHERE X != 0.0 AND Y != 0.0);
 -- dynamic bbox from ADDRESS (ignoring X/Y = 0.0)
-INSERT INTO roads
+INSERT INTO dbB.roads
 SELECT *
 FROM dbA.roads AS r
 WHERE MBRIntersects(
-  r.twkb,
+  GeomFromTWKB( r.twkb ),
   BuildMBR(
-    (SELECT MIN(X) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),
-    (SELECT MIN(Y) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),
-    (SELECT MAX(X) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),
-    (SELECT MAX(Y) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    (SELECT MIN(X) FROM dbB.ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    (SELECT MIN(Y) FROM dbB.ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    (SELECT MAX(X) FROM dbB.ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    (SELECT MAX(Y) FROM dbB.ADDRESS WHERE X != 0.0 AND Y != 0.0),
     4326
   )
 );
 ```
 
+## Geopsatial version
+Create the schema:
+```
+sqlite3 beaver_texas.db < schema.sql
+```
+Then run `spatialite`.
+```
+--sqlite3 beaver_texas.db < schema.sql
+CREATE TABLE geos (ID INTEGER PRIMARY KEY AUTOINCREMENT, NAME TEXT);
+SELECT AddGeometryColumn('geos', 'g', 4269, 'GEOMETRY');
+.loadshp 'C:\gisdata\www2.census.gov\geo\tiger\TIGER_RD18\LAYER\tl_rd22_us_county\tl_rd22_us_county' county UTF-8 4269 g
+
+INSERT INTO geos (g) SELECT g FROM county WHERE statefp = 40 AND name IN ('Beaver', 'Texas');
+ATTACH DATABASE 'beaver_texas.db' AS dbB;
+ATTACH DATABASE 'temp\\voters_new.db' AS dbA;
+CREATE TABLE address_temp AS SELECT * FROM dbA.address WHERE 
+    X > (SELECT Min( MbrMinX( g ) ) FROM geos)
+AND X < (SELECT Max( MbrMaxX( g ) ) FROM geos)
+AND Y > (SELECT Min( MbrMinY( g ) ) FROM geos)
+AND Y < (SELECT Max( MbrMaxY( g ) ) FROM geos);
+SELECT AddGeometryColumn('address_temp', 'g', 4269, 'POINT');
+UPDATE address_temp SET g = MakePoint( X, Y, 4269);
+--select count(*) from address_temp where ST_Intersects( g, (Select st_Union(g) FROM geos) );
+--Insert into address_temp (Address, City, State, Zip, Rating, X, Y) SELECT Address, City, State, Zip, Rating, X, Y FROM dbA.Address where CITY = 'TULSA';
+
+--SELECT * FROM dbA.address WHERE ST_CONTAINS( MakePoint(X, Y), Envelope( (SELECT g FROM geos WHERE ID = 1))) LIMIT 1;
+--SELECT count(*) FROM dbA.address WHERE ST_CONTAINS( (SELECT g FROM geos WHERE ROWID = 0), MakePoint(X, Y, 4269));
+
+INSERT INTO dbB.address (Address, City, State, Zip, Rating, X, Y) SELECT Address, City, State, Zip, Rating, X, Y FROM address_temp WHERE ST_Intersects( g, (SELECT ST_UNION(g) FROM geos) );
+CREATE TABLE voter_temp AS SELECT * FROM dBA.voters WHERE CITY IN (SELECT DISTINCT CITY FROM dbB.address) AND STATE IN (SELECT DISTINCT STATE FROM dbB.address);
+INSERT INTO dbB.voters (LASTNAME,FIRSTNAME,MIDDLENAME,VOTERID,PARTY,ADDRESS,CITY,STATE,ZIP,DATEOFBIRTH,REGISTRATIONDATE) SELECT v.LASTNAME,v.FIRSTNAME,v.MIDDLENAME,v.VOTERID,v.PARTY,v.ADDRESS,v.CITY,v.STATE,v.ZIP,v.DATEOFBIRTH,v.REGISTRATIONDATE FROM voter_temp as v, dbB.address as a WHERE a.city = v.city AND a.state = v.state AND a.address = v.address;
+
+SELECT MIN(X), MIN(Y), MAX(X), MAX(Y) FROM (SELECT * FROM dbB.ADDRESS WHERE X != 0.0 AND Y != 0.0);
+-- dynamic bbox from ADDRESS (ignoring X/Y = 0.0)
+INSERT INTO dbB.roads
+SELECT *
+FROM dbA.roads AS r
+WHERE MBRIntersects(
+  GeomFromTWKB( r.twkb ),
+  BuildMBR(
+    (SELECT MIN(X) FROM dbB.ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    (SELECT MIN(Y) FROM dbB.ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    (SELECT MAX(X) FROM dbB.ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    (SELECT MAX(Y) FROM dbB.ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    4326
+  )
+);
+ALTER TABLE ROADS ADD COLUMN NAME TEXT; UPDATE ROADS SET NAME = '';
+```
+
+## Diagnostics: add geometry columns to view database in GIS
+`spatialite norman.db`.  Note this will significantly enlarge the database.
+```
+SELECT InitSpatialMetadata();
+SELECT AddGeometryColumn('address', 'g', 4326, 'POINT');
+UPDATE address set g = MakePoint(X, Y, 4326);
+SELECT AddGeometryColumn('roads', 'g', 4326, 'GEOMETRY');
+UPDATE roads set g = GeomFromTWKB(twkb, 4326);
+```
+Debug the MBR:
+```
+CREATE TABLE IF NOT EXISTS mbr1 (ID INTEGER PRIMARY KEY AUTOINCREMENT);
+--SELECT DiscardGeometryColumn('mbr1', 'g');
+--SELECT RecoverGeometryColumn('mbr1', 'g', 4269, 'POLYGON');
+SELECT AddGeometryColumn('mbr1', 'g', 4269, 'POINT');
+INSERT INTO mbr1 (g) VALUES ( BuildMBR(
+    (SELECT MIN(X) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    (SELECT MIN(Y) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    (SELECT MAX(X) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    (SELECT MAX(Y) FROM ADDRESS WHERE X != 0.0 AND Y != 0.0),
+    4269) );
+SELECT count(*) FROM roads WHERE MBRIntersects( GeomFromTwkb(twkb) , (SELECT g FROM mbr1 LIMIT 1)); 
+```
+```
+SELECT DiscardGeometryColumn('roads', 'g');
+DROP TABLE roads;
+CREATE TABLE roads (
+id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+osm_id INTEGER NOT NULL,
+class TEXT NOT NULL,
+node_from INTEGER NOT NULL,
+node_to INTEGER NOT NULL,
+--name TEXT NOT NULL,
+oneway_fromto INTEGER NOT NULL,
+oneway_tofrom INTEGER NOT NULL,
+length DOUBLE NOT NULL,
+cost DOUBLE NOT NULL,
+twkb BLOB);
+```
+
+## Delete data outside of a geography
+spatialite
+```
+ATTACH DATABASE 'norman.db' AS dbB;
+ATTACH DATABASE 'temp\voters_new.db' AS dbA;
+.loadshp 'C:\gisdata\www2.census.gov\geo\tiger\TIGER_RD18\LAYER\tl_rd22_us_county\tl_rd22_us_county' county UTF-8 4269 g
+
+DELETE FROM roads WHERE 
+```
 ## Making a new database with a subset of data - by geography
 
 spatialite
@@ -115,3 +223,15 @@ ATTACH DATABASE 'temp\voters_new.db' AS dbA;
 
 ```
 .loadshp 'C:\gisdata\www2.census.gov\geo\tiger\TIGER_RD18\LAYER\tl_rd22_us_county\tl_rd22_us_county' county UTF-8 4269 g
+
+# Theory for how to make this server side
+* Allow creation/ dropping a database.  Run processing in the background.  (node JS)
+* The client should download a fresh geojson dump of the database every so often.  
+* The server can use multiple cpus. 
+* Sqlite management table with jobs queue, or use something like redis to be reasonable.
+* Management page to see jobs in process, that have happened, that are scheduled, and click to view results in viewer.
+* Write a handler that just dumps the db into a geojson by invoking sqlite3 command?  And returns it.
+* Every so often, update the layer in the client.
+* on the admin page, allow jobs control.
+
+TODO: Do something to fix the tall vertical lines.
