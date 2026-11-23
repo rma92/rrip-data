@@ -1,0 +1,12 @@
+C:\local\git\rrip-data\OK-Results>dir 20201103*
+ Volume in drive C is Win10_b
+ Volume Serial Number is 3201-91ED
+
+ Directory of C:\local\git\rrip-data\OK-Results
+
+09/26/2025  08:12 PM        11,627,733 20201103_PrecinctResults.csv
+09/27/2025  04:11 PM           537,050 20201103_PrecinctResults.csv.br
+09/27/2025  04:10 PM           510,444 20201103_PrecinctResults.csv.xz
+09/27/2025  04:11 PM           578,088 20201103_PrecinctResults.csv.zst
+09/27/2025  04:10 PM           275,689 20201103_PrecinctResults.zpaq
+09/27/2025  04:09 PM           499,215 20201103_PrecinctResultsa.csv.bz2
